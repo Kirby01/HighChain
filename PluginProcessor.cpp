@@ -14,10 +14,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HighChainAudioProcessor::cre
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
     params.push_back (std::make_unique<juce::AudioParameterFloat>("input",  "Input",  juce::NormalisableRange<float>(-24.0f, 24.0f, 0.01f), 0.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat>("spark",  "Spark",  juce::NormalisableRange<float>(0.0f, 10.0f, 0.001f), 1.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("spark",  "Spark",  juce::NormalisableRange<float>(0.0f, 10.0f, 0.001f), 4.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat>("output", "Output", juce::NormalisableRange<float>(-24.0f, 24.0f, 0.01f), 0.0f));
-    params.push_back (std::make_unique<juce::AudioParameterBool>("delta", "Delta", false));
-
     return { params.begin(), params.end() };
 }
 
@@ -45,9 +43,8 @@ void HighChainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     const double inGain  = juce::Decibels::decibelsToGain ((double) apvts.getRawParameterValue("input")->load());
     const double outGain = juce::Decibels::decibelsToGain ((double) apvts.getRawParameterValue("output")->load());
     const double spark   = (double) apvts.getRawParameterValue("spark")->load();
-    const bool deltaMode = apvts.getRawParameterValue("delta")->load() > 0.5f;
-
     const double dcCoef = std::exp (-2.0 * juce::MathConstants<double>::pi * 10.0 / currentSampleRate);
+    double blockMeter = 0.0;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -62,9 +59,10 @@ void HighChainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         const double motion2 = core.processSubSample (x0);
 
         const double layer = 0.5 * (motion1 + motion2) * spark;
+        blockMeter = juce::jmax (blockMeter, std::abs (layer));
 
-        double wetL = deltaMode ? layer : inL + layer;
-        double wetR = deltaMode ? layer : inR + layer;
+        double wetL = inL + layer;
+        double wetR = inR + layer;
 
         const double dcOutL = wetL - core.dcX1L + dcCoef * core.dcY1L;
         const double dcOutR = wetR - core.dcX1R + dcCoef * core.dcY1R;
@@ -76,6 +74,10 @@ void HighChainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         if (numChannels > 1)
             buffer.setSample (1, i, (float) (dcOutR * outGain));
     }
+
+    const float meterTarget = juce::jlimit (0.0f, 1.0f, (float) (blockMeter * 5.0));
+    const float oldMeter = sparkMeter.load();
+    sparkMeter.store (juce::jmax (meterTarget, oldMeter * 0.92f));
 }
 
 void HighChainAudioProcessor::getStateInformation (juce::MemoryBlock& destData)

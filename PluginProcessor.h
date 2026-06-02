@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 
 class HighChainAudioProcessor : public juce::AudioProcessor
 {
@@ -33,6 +34,8 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     juce::AudioProcessorValueTreeState apvts;
 
+    float getSparkMeter() const { return sparkMeter.load(); }
+
 private:
     struct Core
     {
@@ -62,6 +65,7 @@ private:
 
     Core core;
     double currentSampleRate = 44100.0;
+    std::atomic<float> sparkMeter { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HighChainAudioProcessor)
 };
