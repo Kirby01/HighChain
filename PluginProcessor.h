@@ -39,26 +39,31 @@ public:
 private:
     struct Core
     {
-        double prev = 0.0, flip = 1.0, swapHold = 0.0, lastIn = 0.0;
-        bool swapReady = false;
-        double dcX1L = 0.0, dcY1L = 0.0, dcX1R = 0.0, dcY1R = 0.0;
+        double prev = 0.0;
+        double flip = 1.0;
+        double lastIn = 0.0;
+
+        double dcX1L = 0.0, dcY1L = 0.0;
+        double dcX1R = 0.0, dcY1R = 0.0;
 
         void reset()
         {
-            prev = 0.0; flip = 1.0; swapHold = 0.0; lastIn = 0.0; swapReady = false;
-            dcX1L = dcY1L = dcX1R = dcY1R = 0.0;
+            prev = 0.0;
+            flip = 1.0;
+            lastIn = 0.0;
+
+            dcX1L = dcY1L = 0.0;
+            dcX1R = dcY1R = 0.0;
         }
 
         double processSubSample (double x)
         {
-            double swapped;
-            if (! swapReady) { swapHold = x; swapped = x; swapReady = true; }
-            else             { swapped = swapHold; swapHold = x; swapReady = false; }
-
             flip = -flip;
-            const double flipped = swapped * flip;
-            const double motion = prev - flipped;
-            prev = flipped;
+
+            const double xf = x * flip;
+            const double motion = xf - prev;
+            prev = xf;
+
             return motion;
         }
     };
