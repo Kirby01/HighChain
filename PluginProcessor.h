@@ -37,23 +37,20 @@ public:
     float getSparkMeter() const { return sparkMeter.load(); }
 
 private:
-    struct Core
+    struct ChannelCore
     {
         double prev = 0.0;
         double flip = 1.0;
         double lastIn = 0.0;
 
-        double dcX1L = 0.0, dcY1L = 0.0;
-        double dcX1R = 0.0, dcY1R = 0.0;
+        double dcX1 = 0.0, dcY1 = 0.0;
 
         void reset()
         {
             prev = 0.0;
             flip = 1.0;
             lastIn = 0.0;
-
-            dcX1L = dcY1L = 0.0;
-            dcX1R = dcY1R = 0.0;
+            dcX1 = dcY1 = 0.0;
         }
 
         double processSubSample (double x)
@@ -68,7 +65,9 @@ private:
         }
     };
 
-    Core core;
+    ChannelCore coreL, coreR;
+
+    double processChannelSample (double input, ChannelCore& ch, double amount, double dcCoef);
     double currentSampleRate = 44100.0;
     std::atomic<float> sparkMeter { 0.0f };
 

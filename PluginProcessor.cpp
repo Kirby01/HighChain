@@ -23,7 +23,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HighChainAudioProcessor::cre
 void HighChainAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     currentSampleRate = sampleRate;
-    core.reset();
+    coreL.reset();
+    coreR.reset();
 }
 
 bool HighChainAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -34,6 +35,29 @@ bool HighChainAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts
         return false;
 
     return layouts.getMainInputChannelSet() == out;
+}
+
+double HighChainAudioProcessor::processChannelSample (double input, ChannelCore& ch, double amount, double dcCoef)
+{
+    // ReaJS 2x upsample per channel:
+    // xA = 0.5 * (lastIn + in); xB = in; lastIn = in;
+    const double xA = 0.5 * (ch.lastIn + input);
+    const double xB = input;
+    ch.lastIn = input;
+
+    const double motionA = ch.processSubSample (xA);
+    const double yA = xA + motionA * amount;
+
+    const double motionB = ch.processSubSample (xB);
+    const double yB = xB + motionB * amount;
+
+    const double y = 0.5 * (yA + yB);
+
+    const double dcOut = y - ch.dcX1 + dcCoef * ch.dcY1;
+    ch.dcX1 = y;
+    ch.dcY1 = dcOut;
+
+    return dcOut;
 }
 
 void HighChainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -61,51 +85,18 @@ void HighChainAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         const double inL = buffer.getSample (0, i) * inGain;
         const double inR = (numChannels > 1 ? buffer.getSample (1, i) : inL) * inGain;
 
-        // ReaJS:
-        // in = spl0 * inGain;
-        //
-        // JUCE keeps stereo audio, but uses the same mono HighChain control/audio source.
-        const double x0 = 0.5 * (inL + inR);
+        // True dual-mono processing: each side gets its own HighChain state.
+        // This avoids the previous mono shortcut: x0 = 0.5 * (L + R), then adding
+        // the same generated layer back to both channels, which could narrow or shift
+        // the stereo image.
+        const double dcOutL = processChannelSample (inL, coreL, amount, dcCoef);
+        const double dcOutR = (numChannels > 1)
+                                ? processChannelSample (inR, coreR, amount, dcCoef)
+                                : dcOutL;
 
-        // ReaJS 2x upsample:
-        // xA = 0.5 * (lastIn + in);
-        // xB = in;
-        // lastIn = in;
-        const double xA = 0.5 * (core.lastIn + x0);
-        const double xB = x0;
-        core.lastIn = x0;
-
-        // ReaJS substep A:
-        // flip = -flip;
-        // xf = xA * flip;
-        // motionA = xf - prev;
-        // prev = xf;
-        // layerA = motionA * amount;
-        // yA = xA + layerA;
-        const double motionA = core.processSubSample (xA);
-        const double layerA = motionA * amount;
-        const double yA = xA + layerA;
-
-        // ReaJS substep B:
-        const double motionB = core.processSubSample (xB);
-        const double layerB = motionB * amount;
-        const double yB = xB + layerB;
-
-        // Working version: direct average downsample, no extra downLP smoothing.
-        const double y = 0.5 * (yA + yB);
-
-        // Convert the mono processed result into a layer and add it to both stereo channels.
-        const double layer = y - x0;
-        blockMeter = juce::jmax (blockMeter, std::abs (layer));
-
-        const double wetL = inL + layer;
-        const double wetR = inR + layer;
-
-        const double dcOutL = wetL - core.dcX1L + dcCoef * core.dcY1L;
-        const double dcOutR = wetR - core.dcX1R + dcCoef * core.dcY1R;
-
-        core.dcX1L = wetL; core.dcY1L = dcOutL;
-        core.dcX1R = wetR; core.dcY1R = dcOutR;
+        blockMeter = juce::jmax (blockMeter, std::abs (dcOutL - inL));
+        if (numChannels > 1)
+            blockMeter = juce::jmax (blockMeter, std::abs (dcOutR - inR));
 
         buffer.setSample (0, i, (float) (dcOutL * outGain));
 
